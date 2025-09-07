@@ -276,6 +276,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\docs\dda_qimage_saver_10_files.cpp" />
+    <ClCompile Include="..\..\..\docs\dda_qimage_saver_10_files_2.cpp" />
     <ClCompile Include="..\..\..\src\tests\desk_dupl_test01\main_desk_dupl_test01.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
