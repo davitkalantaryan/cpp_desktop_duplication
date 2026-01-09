@@ -1,61 +1,41 @@
-// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
-// PARTICULAR PURPOSE.
-//
-// Copyright (c) Microsoft Corporation. All rights reserved
-
-#ifndef _OUTPUTMANAGER_H_
-#define _OUTPUTMANAGER_H_
-
-#include <stdio.h>
-
+// =============================
+// File: OutputManager.h
+// =============================
+#pragma once
 #include "CommonTypes.h"
-#include "warning.h"
+#include <string>
 
-//
-// Handles the task of drawing into a window.
-// Has the functionality to draw the mouse given a mouse shape buffer and position
-//
-class OUTPUTMANAGER
-{
-    public:
-        OUTPUTMANAGER();
-        ~OUTPUTMANAGER();
-        DUPL_RETURN InitOutput(HWND Window, INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
-        DUPL_RETURN UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _Inout_ bool* Occluded);
-        void CleanRefs();
-        HANDLE GetSharedHandle();
-        void WindowResize();
+class OUTPUTMANAGER {
+public:
+    OUTPUTMANAGER();
+    ~OUTPUTMANAGER();
 
-    private:
-    // Methods
-        DUPL_RETURN ProcessMonoMask(bool IsMono, _Inout_ PTR_INFO* PtrInfo, _Out_ INT* PtrWidth, _Out_ INT* PtrHeight, _Out_ INT* PtrLeft, _Out_ INT* PtrTop, _Outptr_result_bytebuffer_(*PtrHeight * *PtrWidth * BPP) BYTE** InitBuffer, _Out_ D3D11_BOX* Box);
-        DUPL_RETURN MakeRTV();
-        void SetViewPort(UINT Width, UINT Height);
-        DUPL_RETURN InitShaders();
-        //DUPL_RETURN InitGeometry();
-        DUPL_RETURN CreateSharedSurf(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
-        DUPL_RETURN DrawFrame();
-        DUPL_RETURN DrawMouse(_In_ PTR_INFO* PtrInfo);
-        DUPL_RETURN ResizeSwapChain();
+    // Initializes device and shared surface (full virtual desktop bounds supplied)
+    DUPL_RETURN InitOutput(RECT DeskBounds, _Out_ HANDLE* SharedHandle, _Out_ ID3D11Texture2D** SharedSurf, _Out_ IDXGIKeyedMutex** KeyMutex);
 
-    // Vars
-        IDXGISwapChain1* m_SwapChain;
-        ID3D11Device* m_Device;
-        IDXGIFactory2* m_Factory;
-        ID3D11DeviceContext* m_DeviceContext;
-        ID3D11RenderTargetView* m_RTV;
-        ID3D11SamplerState* m_SamplerLinear;
-        ID3D11BlendState* m_BlendState;
-        ID3D11VertexShader* m_VertexShader;
-        ID3D11PixelShader* m_PixelShader;
-        ID3D11InputLayout* m_InputLayout;
-        ID3D11Texture2D* m_SharedSurf;
-        IDXGIKeyedMutex* m_KeyMutex;
-        HWND m_WindowHandle;
-        bool m_NeedsResize;
-        DWORD m_OcclusionCookie;
+    // Called frequently: if a new frame serial is observed, save the shared surface to an incrementing JPEG
+    DUPL_RETURN UpdateApplicationWindow();
+
+    void CleanRefs();
+
+private:
+    DUPL_RETURN SaveSharedSurfaceToJpeg();
+
+    // D3D objects
+    ID3D11Device* m_Device = nullptr;
+    ID3D11DeviceContext* m_Context = nullptr;
+
+    // Shared desktop surface + mutex
+    ID3D11Texture2D* m_SharedSurf = nullptr;
+    IDXGIKeyedMutex* m_KeyMutex = nullptr;
+
+    // CPU staging texture for readback
+    ID3D11Texture2D* m_Staging = nullptr;
+
+    // Virtual desktop bounds
+    RECT m_DeskBounds{ 0,0,0,0 };
+
+    // Saved frame tracking
+    uint64_t m_LastSavedSerial = 0;
+    uint64_t m_SaveCounter = 0; // 1.jpg, 2.jpg, ...
 };
-
-#endif
