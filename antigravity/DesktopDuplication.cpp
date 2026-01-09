@@ -21,7 +21,6 @@
 // Frame Export Globals
 //
 bool g_EnableFrameSaving = true;
-bool g_HeadlessMode = true;              // Run without a visible window           // Master toggle
 int g_SaveFrameInterval = 1;               // Save every Nth frame (1 = all frames)
 std::string g_OutputDirectory = "./out";   // Output path
 int g_CurrentFrameNumber = 0;              // Frame counter
@@ -72,7 +71,6 @@ HRESULT EnumOutputsExpectedErrors[] = {
 // Forward Declarations
 //
 DWORD WINAPI DDProc(_In_ void* Param);
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 bool ProcessCmdline(_Out_ INT* Output);
 void ShowHelp();
 
@@ -171,8 +169,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     HANDLE ExpectedErrorEvent = nullptr;
     HANDLE TerminateThreadsEvent = nullptr;
 
-    // Window
-    HWND WindowHandle = nullptr;
+
 
     bool CmdResult = ProcessCmdline(&SingleOutput);
     if (!CmdResult)
@@ -205,87 +202,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
         return 0;
     }
 
-    // Load simple cursor
-    HCURSOR Cursor = nullptr;
-    Cursor = LoadCursor(nullptr, IDC_ARROW);
-    if (!Cursor)
-    {
-        ProcessFailure(nullptr, L"Cursor load failed", L"Error", E_UNEXPECTED);
-        return 0;
-    }
-
-    // Register class
-    WNDCLASSEXW Wc;
-    Wc.cbSize           = sizeof(WNDCLASSEXW);
-    Wc.style            = CS_HREDRAW | CS_VREDRAW;
-    Wc.lpfnWndProc      = WndProc;
-    Wc.cbClsExtra       = 0;
-    Wc.cbWndExtra       = 0;
-    Wc.hInstance        = hInstance;
-    Wc.hIcon            = nullptr;
-    Wc.hCursor          = Cursor;
-    Wc.hbrBackground    = nullptr;
-    Wc.lpszMenuName     = nullptr;
-    Wc.lpszClassName    = L"ddasample";
-    Wc.hIconSm          = nullptr;
-    if (!RegisterClassExW(&Wc))
-    {
-        ProcessFailure(nullptr, L"Window class registration failed", L"Error", E_UNEXPECTED);
-        return 0;
-    }
-
-    // Create window
-    RECT WindowRect = {0, 0, 800, 600};
-    AdjustWindowRect(&WindowRect, WS_OVERLAPPEDWINDOW, FALSE);
-    WindowHandle = CreateWindowW(L"ddasample", L"DXGI desktop duplication sample",
-                           WS_OVERLAPPEDWINDOW,
-                           0, 0,
-                           WindowRect.right - WindowRect.left, WindowRect.bottom - WindowRect.top,
-                           nullptr, nullptr, hInstance, nullptr);
-    if (!WindowHandle)
-    {
-        ProcessFailure(nullptr, L"Window creation failed", L"Error", E_FAIL);
-        return 0;
-    }
-
-    DestroyCursor(Cursor);
-
-    if (!g_HeadlessMode) ShowWindow(WindowHandle, nCmdShow);
-    if (!g_HeadlessMode) UpdateWindow(WindowHandle);
-
     THREADMANAGER ThreadMgr;
     RECT DeskBounds;
     UINT OutputCount;
 
-    // Message loop (attempts to update screen when no other messages to process)
-    MSG msg = {0};
+    // Headless loop (waits for events and updates frame saving)
     bool FirstTime = true;
-    bool Occluded = true;
+    bool Occluded = false; // Kept for method signature compatibility, but unused
     DYNAMIC_WAIT DynamicWait;
 
-    while (WM_QUIT != msg.message)
+    while (WaitForSingleObjectEx(UnexpectedErrorEvent, 0, FALSE) != WAIT_OBJECT_0)
     {
         DUPL_RETURN Ret = DUPL_RETURN_SUCCESS;
-        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == OCCLUSION_STATUS_MSG)
-            {
-                // Present may not be occluded now so try again
-                Occluded = false;
-            }
-            else
-            {
-                // Process window messages
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-        }
-        else if (WaitForSingleObjectEx(UnexpectedErrorEvent, 0, FALSE) == WAIT_OBJECT_0)
-        {
-            // Unexpected error occurred so exit the application
-            break;
-        }
-        else if (FirstTime || WaitForSingleObjectEx(ExpectedErrorEvent, 0, FALSE) == WAIT_OBJECT_0)
+        
+        if (FirstTime || WaitForSingleObjectEx(ExpectedErrorEvent, 0, FALSE) == WAIT_OBJECT_0)
         {
             if (!FirstTime)
             {
@@ -311,7 +241,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             }
 
             // Re-initialize
-            Ret = OutMgr.InitOutput(WindowHandle, SingleOutput, &OutputCount, &DeskBounds);
+            Ret = OutMgr.InitOutput(SingleOutput, &OutputCount, &DeskBounds);
             if (Ret == DUPL_RETURN_SUCCESS)
             {
                 // Set total output count for synchronization
@@ -329,16 +259,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 }
             }
 
-            // We start off in occluded state and we should immediate get a occlusion status window message
+            // We start off in "occluded" state (logic kept but meaningless in headless)
             Occluded = true;
         }
         else
         {
             // Nothing else to do, so try to present to write out to window if not occluded
-            if (!Occluded)
-            {
-                Ret = OutMgr.UpdateApplicationWindow(ThreadMgr.GetPointerInfo(), &Occluded);
-            }
+            Ret = OutMgr.UpdateApplicationWindow(ThreadMgr.GetPointerInfo(), &Occluded);
         }
 
         // Check if for errors
@@ -364,16 +291,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
 
     // Clean up
-    CloseHandle(UnexpectedErrorEvent);
-    CloseHandle(ExpectedErrorEvent);
-    CloseHandle(TerminateThreadsEvent);
-    // DeleteCriticalSection(&g_InitCounterCS);
-
-    if (msg.message == WM_QUIT)
-    {
-        // For a WM_QUIT message we should return the wParam value
-        return static_cast<INT>(msg.wParam);
-    }
+    if (UnexpectedErrorEvent) CloseHandle(UnexpectedErrorEvent);
+    if (ExpectedErrorEvent) CloseHandle(ExpectedErrorEvent);
+    if (TerminateThreadsEvent) CloseHandle(TerminateThreadsEvent);
 
     return 0;
 }
@@ -397,12 +317,7 @@ bool ProcessCmdline(_Out_ INT* Output)
     // __argv and __argc are global vars set by system
     for (UINT i = 1; i < static_cast<UINT>(__argc); ++i)
     {
-        if ((strcmp(__argv[i], "-gui") == 0) ||
-            (strcmp(__argv[i], "/gui") == 0))
-        {
-            g_HeadlessMode = false;
-            continue;
-        }
+
         if ((strcmp(__argv[i], "-output") == 0) ||
             (strcmp(__argv[i], "/output") == 0))
         {
@@ -429,30 +344,7 @@ bool ProcessCmdline(_Out_ INT* Output)
     return true;
 }
 
-//
-// Window message processor
-//
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-        case WM_DESTROY:
-        {
-            PostQuitMessage(0);
-            break;
-        }
-        case WM_SIZE:
-        {
-            // Tell output manager that window size has changed
-            OutMgr.WindowResize();
-            break;
-        }
-        default:
-            return DefWindowProc(hWnd, message, wParam, lParam);
-    }
 
-    return 0;
-}
 
 //
 // Entry point for new duplication threads

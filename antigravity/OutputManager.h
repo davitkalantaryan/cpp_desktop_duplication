@@ -22,11 +22,10 @@ class OUTPUTMANAGER
     public:
         OUTPUTMANAGER();
         ~OUTPUTMANAGER();
-        DUPL_RETURN InitOutput(HWND Window, INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
+        DUPL_RETURN InitOutput(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
         DUPL_RETURN UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _Inout_ bool* Occluded);
         void CleanRefs();
         HANDLE GetSharedHandle();
-        void WindowResize();
 
     private:
     // Methods
@@ -37,10 +36,8 @@ class OUTPUTMANAGER
         DUPL_RETURN CreateSharedSurf(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
         DUPL_RETURN DrawFrame();
         DUPL_RETURN DrawMouse(_In_ PTR_INFO* PtrInfo);
-        DUPL_RETURN ResizeSwapChain();
 
     // Vars
-        IDXGISwapChain1* m_SwapChain;
         ID3D11Device* m_Device;
         IDXGIFactory2* m_Factory;
         ID3D11DeviceContext* m_DeviceContext;
@@ -52,9 +49,8 @@ class OUTPUTMANAGER
         ID3D11InputLayout* m_InputLayout;
         ID3D11Texture2D* m_SharedSurf;
         IDXGIKeyedMutex* m_KeyMutex;
-        HWND m_WindowHandle;
-        bool m_NeedsResize;
-        DWORD m_OcclusionCookie;
+        ID3D11Texture2D* m_OutputTexture; // Replaces SwapChain buffer
+        bool m_NeedsResize; 
         ID3D11Texture2D* m_StagingTexture;
         void SaveCurrentFrame(ID3D11Texture2D* sourceTexture);
 };

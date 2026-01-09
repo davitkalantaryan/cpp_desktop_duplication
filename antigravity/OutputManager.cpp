@@ -26,7 +26,7 @@ using namespace DirectX;
 //
 // Constructor NULLs out all pointers & sets appropriate var vals
 //
-OUTPUTMANAGER::OUTPUTMANAGER() : m_SwapChain(nullptr), m_StagingTexture(nullptr),
+OUTPUTMANAGER::OUTPUTMANAGER() : m_OutputTexture(nullptr), m_StagingTexture(nullptr),
                                  m_Device(nullptr),
                                  m_Factory(nullptr),
                                  m_DeviceContext(nullptr),
@@ -38,9 +38,7 @@ OUTPUTMANAGER::OUTPUTMANAGER() : m_SwapChain(nullptr), m_StagingTexture(nullptr)
                                  m_InputLayout(nullptr),
                                  m_SharedSurf(nullptr),
                                  m_KeyMutex(nullptr),
-                                 m_WindowHandle(nullptr),
-                                 m_NeedsResize(false),
-                                 m_OcclusionCookie(0)
+                                 m_NeedsResize(false)
 {
 }
 
@@ -52,23 +50,14 @@ OUTPUTMANAGER::~OUTPUTMANAGER()
     CleanRefs();
 }
 
-//
-// Indicates that window has been resized.
-//
-void OUTPUTMANAGER::WindowResize()
-{
-    m_NeedsResize = true;
-}
+
 
 //
 // Initialize all state
 //
-DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds)
+DUPL_RETURN OUTPUTMANAGER::InitOutput(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds)
 {
     HRESULT hr;
-
-    // Store window handle
-    m_WindowHandle = Window;
 
     // Driver types supported
     D3D_DRIVER_TYPE DriverTypes[] =
@@ -131,49 +120,35 @@ DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT*
         return ProcessFailure(m_Device, L"Failed to get parent DXGI Factory", L"Error", hr, SystemTransitionsExpectedErrors);
     }
 
-    // Register for occlusion status windows message
-    hr = m_Factory->RegisterOcclusionStatusWindow(Window, OCCLUSION_STATUS_MSG, &m_OcclusionCookie);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to register for occlusion message", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Get window size
-    RECT WindowRect;
-    GetClientRect(m_WindowHandle, &WindowRect);
-    UINT Width = WindowRect.right - WindowRect.left;
-    UINT Height = WindowRect.bottom - WindowRect.top;
-
-    // Create swapchain for window
-    DXGI_SWAP_CHAIN_DESC1 SwapChainDesc;
-    RtlZeroMemory(&SwapChainDesc, sizeof(SwapChainDesc));
-
-    SwapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    SwapChainDesc.BufferCount = 2;
-    SwapChainDesc.Width = Width;
-    SwapChainDesc.Height = Height;
-    SwapChainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    SwapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    SwapChainDesc.SampleDesc.Count = 1;
-    SwapChainDesc.SampleDesc.Quality = 0;
-    hr = m_Factory->CreateSwapChainForHwnd(m_Device, Window, &SwapChainDesc, nullptr, nullptr, &m_SwapChain);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to create window swapchain", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Disable the ALT-ENTER shortcut for entering full-screen mode
-    hr = m_Factory->MakeWindowAssociation(Window, DXGI_MWA_NO_ALT_ENTER);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to make window association", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Create shared texture
+    // Create shared texture - We do this BEFORE output texture creation to get the bounds
     DUPL_RETURN Return = CreateSharedSurf(SingleOutput, OutCount, DeskBounds);
     if (Return != DUPL_RETURN_SUCCESS)
     {
         return Return;
+    }
+
+    UINT Width = DeskBounds->right - DeskBounds->left;
+    UINT Height = DeskBounds->bottom - DeskBounds->top;
+
+    // Create output texture (replaces SwapChain)
+    D3D11_TEXTURE2D_DESC OutputTexDesc;
+    RtlZeroMemory(&OutputTexDesc, sizeof(OutputTexDesc));
+    OutputTexDesc.Width = Width;
+    OutputTexDesc.Height = Height;
+    OutputTexDesc.MipLevels = 1;
+    OutputTexDesc.ArraySize = 1;
+    OutputTexDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    OutputTexDesc.SampleDesc.Count = 1;
+    OutputTexDesc.SampleDesc.Quality = 0;
+    OutputTexDesc.Usage = D3D11_USAGE_DEFAULT;
+    OutputTexDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    OutputTexDesc.CPUAccessFlags = 0;
+    OutputTexDesc.MiscFlags = 0;
+
+    hr = m_Device->CreateTexture2D(&OutputTexDesc, nullptr, &m_OutputTexture);
+    if (FAILED(hr))
+    {
+        return ProcessFailure(m_Device, L"Failed to create output texture", L"Error", hr, SystemTransitionsExpectedErrors);
     }
 
     // Make new render target view
@@ -226,9 +201,6 @@ DUPL_RETURN OUTPUTMANAGER::InitOutput(HWND Window, INT SingleOutput, _Out_ UINT*
     {
         return Return;
     }
-
-    GetWindowRect(m_WindowHandle, &WindowRect);
-    MoveWindow(m_WindowHandle, WindowRect.left, WindowRect.top, (DeskBounds->right - DeskBounds->left) / 2, (DeskBounds->bottom - DeskBounds->top) / 2, TRUE);
 
     return Return;
 }
@@ -455,27 +427,11 @@ DUPL_RETURN OUTPUTMANAGER::UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _
     }
 
     // Present to window if all worked
+    // Present to window if all worked
     if (Ret == DUPL_RETURN_SUCCESS)
     {
-        // Present to window
-        
-        // Capture frame if requested
-        ID3D11Texture2D* backBuffer = nullptr;
-        hr = m_SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuffer));
-        if (SUCCEEDED(hr))
-        {
-            SaveCurrentFrame(backBuffer);
-            backBuffer->Release();
-        }
-        hr = m_SwapChain->Present(1, 0);
-        if (FAILED(hr))
-        {
-            return ProcessFailure(m_Device, L"Failed to present", L"Error", hr, SystemTransitionsExpectedErrors);
-        }
-        else if (hr == DXGI_STATUS_OCCLUDED)
-        {
-            *Occluded = true;
-        }
+        // Save the frame directly from the output texture
+        SaveCurrentFrame(m_OutputTexture);
     }
 
     return Ret;
@@ -512,11 +468,7 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
     // If window was resized, resize swapchain
     if (m_NeedsResize)
     {
-        DUPL_RETURN Ret = ResizeSwapChain();
-        if (Ret != DUPL_RETURN_SUCCESS)
-        {
-            return Ret;
-        }
+        // NeedsResize flag should not be set in headless mode
         m_NeedsResize = false;
     }
 
@@ -1012,19 +964,13 @@ DUPL_RETURN OUTPUTMANAGER::InitShaders()
 //
 // Reset render target view
 //
+//
+// Reset render target view
+//
 DUPL_RETURN OUTPUTMANAGER::MakeRTV()
 {
-    // Get backbuffer
-    ID3D11Texture2D* BackBuffer = nullptr;
-    HRESULT hr = m_SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&BackBuffer));
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to get backbuffer for making render target view in OUTPUTMANAGER", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
     // Create a render target view
-    hr = m_Device->CreateRenderTargetView(BackBuffer, nullptr, &m_RTV);
-    BackBuffer->Release();
+    HRESULT hr = m_Device->CreateRenderTargetView(m_OutputTexture, nullptr, &m_RTV);
     if (FAILED(hr))
     {
         return ProcessFailure(m_Device, L"Failed to create render target view in OUTPUTMANAGER", L"Error", hr, SystemTransitionsExpectedErrors);
@@ -1054,40 +1000,7 @@ void OUTPUTMANAGER::SetViewPort(UINT Width, UINT Height)
 //
 // Resize swapchain
 //
-DUPL_RETURN OUTPUTMANAGER::ResizeSwapChain()
-{
-    if (m_RTV)
-    {
-        m_RTV->Release();
-        m_RTV = nullptr;
-    }
 
-    RECT WindowRect;
-    GetClientRect(m_WindowHandle, &WindowRect);
-    UINT Width = WindowRect.right - WindowRect.left;
-    UINT Height = WindowRect.bottom - WindowRect.top;
-
-    // Resize swapchain
-    DXGI_SWAP_CHAIN_DESC SwapChainDesc;
-    m_SwapChain->GetDesc(&SwapChainDesc);
-    HRESULT hr = m_SwapChain->ResizeBuffers(SwapChainDesc.BufferCount, Width, Height, SwapChainDesc.BufferDesc.Format, SwapChainDesc.Flags);
-    if (FAILED(hr))
-    {
-        return ProcessFailure(m_Device, L"Failed to resize swapchain buffers in OUTPUTMANAGER", L"Error", hr, SystemTransitionsExpectedErrors);
-    }
-
-    // Make new render target view
-    DUPL_RETURN Ret = MakeRTV();
-    if (Ret != DUPL_RETURN_SUCCESS)
-    {
-        return Ret;
-    }
-
-    // Set new viewport
-    SetViewPort(Width, Height);
-
-    return Ret;
-}
 
 //
 // Releases all references
@@ -1147,10 +1060,10 @@ void OUTPUTMANAGER::CleanRefs()
         m_Device = nullptr;
     }
 
-    if (m_SwapChain)
+    if (m_OutputTexture)
     {
-        m_SwapChain->Release();
-        m_SwapChain = nullptr;
+        m_OutputTexture->Release();
+        m_OutputTexture = nullptr;
     }
 
     if (m_SharedSurf)
@@ -1167,11 +1080,6 @@ void OUTPUTMANAGER::CleanRefs()
 
     if (m_Factory)
     {
-        if (m_OcclusionCookie)
-        {
-            m_Factory->UnregisterOcclusionStatus(m_OcclusionCookie);
-            m_OcclusionCookie = 0;
-        }
         m_Factory->Release();
         m_Factory = nullptr;
     }
