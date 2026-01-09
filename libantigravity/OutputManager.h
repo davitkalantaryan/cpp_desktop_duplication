@@ -8,9 +8,14 @@
 #ifndef _OUTPUTMANAGER_H_
 #define _OUTPUTMANAGER_H_
 
-#include <stdio.h>
-
+#include <windows.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <vector>
+#include <string>
+#include <memory>
 #include "CommonTypes.h"
+#include "lib_dda.h"
 #include "warning.h"
 
 //
@@ -26,6 +31,9 @@ class OUTPUTMANAGER
         DUPL_RETURN UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _Inout_ bool* Occluded);
         void CleanRefs();
         HANDLE GetSharedHandle();
+        
+        // Callback support
+        void SetFrameCallback(TypeDesktopChange callback, void* userData);
 
     private:
     // Methods
@@ -53,6 +61,10 @@ class OUTPUTMANAGER
         bool m_NeedsResize; 
         ID3D11Texture2D* m_StagingTexture;
         void SaveCurrentFrame(ID3D11Texture2D* sourceTexture);
+
+        // Callback data
+        TypeDesktopChange m_FrameCallback = nullptr;
+        void* m_CallbackUserData = nullptr;
 };
 
 #endif

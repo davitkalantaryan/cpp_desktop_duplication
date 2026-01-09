@@ -14,12 +14,6 @@ using std::max;
 #include <QString>
 #include <QDir>
 
-// External globals from DesktopDuplication.cpp
-extern bool g_EnableFrameSaving;
-extern int g_SaveFrameInterval;
-extern std::string g_OutputDirectory;
-extern int g_CurrentFrameNumber;
-// extern bool g_AllMonitorsInitialized; // Removed as per user request
 
 using namespace DirectX;
 
@@ -1087,14 +1081,18 @@ void OUTPUTMANAGER::CleanRefs()
 
 
 
+
+//
+// Set callback for frame updates
+//
+void OUTPUTMANAGER::SetFrameCallback(TypeDesktopChange callback, void* userData)
+{
+    m_FrameCallback = callback;
+    m_CallbackUserData = userData;
+}
+
 void OUTPUTMANAGER::SaveCurrentFrame(ID3D11Texture2D* sourceTexture)
 {
-    if (!g_EnableFrameSaving) return;
-    if (g_CurrentFrameNumber % g_SaveFrameInterval != 0) {
-        g_CurrentFrameNumber++;
-        return;
-    }
-
     HRESULT hr;
     D3D11_TEXTURE2D_DESC desc;
     sourceTexture->GetDesc(&desc);
@@ -1136,7 +1134,7 @@ void OUTPUTMANAGER::SaveCurrentFrame(ID3D11Texture2D* sourceTexture)
     if (FAILED(hr)) return;
 
     // Create QImage
-    // Note: Format_ARGB32 is for BGRA data (which is what B8G8R8A8 is)
+    // Note: Format_RGB32 is effectively BGR/BGRA in Qt on little endian, but DX11 B8G8R8A8 is exactly what we have.
     QImage image(desc.Width, desc.Height, QImage::Format_RGB32);
 
     // Copy row-by-row
@@ -1148,20 +1146,11 @@ void OUTPUTMANAGER::SaveCurrentFrame(ID3D11Texture2D* sourceTexture)
 
     m_DeviceContext->Unmap(m_StagingTexture, 0);
 
-    // Ensure directory exists
-    QDir dir(QString::fromStdString(g_OutputDirectory));
-    if (!dir.exists()) {
-        dir.mkpath(".");
+    // If callback is set, use it
+    if (m_FrameCallback)
+    {
+        m_FrameCallback(m_CallbackUserData, (const void*)&image);
     }
-
-    // Save
-    QString filename = QString("%1/frame_%2.png")
-        .arg(QString::fromStdString(g_OutputDirectory))
-        .arg(g_CurrentFrameNumber, 6, 10, QChar('0'));
-    
-    image.save(filename, "PNG");
-    
-    g_CurrentFrameNumber++;
 }
 
 
