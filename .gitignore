@@ -94,3 +94,9 @@ prj/tests/googletest_mult/Makefile.googletest_getter
 /from_msdn/*.vcxproj.user
 /from_msdn/x64
 
+/antigravity/*/x64
+/antigravity/x64
+/antigravity/Debug
+/antigravity/Release
+/antigravity/*.vcxproj.user
+
