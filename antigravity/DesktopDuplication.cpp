@@ -12,6 +12,7 @@
 #include "DuplicationManager.h"
 #include "OutputManager.h"
 #include "ThreadManager.h"
+#include <atomic>
 
 //
 // Globals
@@ -27,7 +28,9 @@ int g_CurrentFrameNumber = 0;              // Frame counter
 
 //
 // Globals
+// Globals
 OUTPUTMANAGER OutMgr;
+std::atomic<int> g_InitializationCount{ 0 };
 
 // Below are lists of errors expect from Dxgi API calls when a transition event like mode change, PnpStop, PnpStart
 // desktop switch, TDR or session disconnect/reconnect. In all these cases we want the application to clean up the threads that process
@@ -304,12 +307,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             {
                 // First time through the loop so nothing to clean up
                 FirstTime = false;
+                
             }
 
             // Re-initialize
             Ret = OutMgr.InitOutput(WindowHandle, SingleOutput, &OutputCount, &DeskBounds);
             if (Ret == DUPL_RETURN_SUCCESS)
             {
+                // Set total output count for synchronization
+                // g_TotalOutputCount = OutputCount;
+                
                 HANDLE SharedHandle = OutMgr.GetSharedHandle();
                 if (SharedHandle)
                 {
@@ -360,6 +367,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     CloseHandle(UnexpectedErrorEvent);
     CloseHandle(ExpectedErrorEvent);
     CloseHandle(TerminateThreadsEvent);
+    // DeleteCriticalSection(&g_InitCounterCS);
 
     if (msg.message == WM_QUIT)
     {
@@ -579,6 +587,8 @@ DWORD WINAPI DDProc(_In_ void* Param)
             break;
         }
 
+
+        
         // Release acquired keyed mutex
         hr = KeyMutex->ReleaseSync(1);
         if (FAILED(hr))

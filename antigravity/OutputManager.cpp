@@ -6,6 +6,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved
 
 #include <algorithm>
+#include <vector>
 using std::min;
 using std::max;
 #include "OutputManager.h"
@@ -18,6 +19,7 @@ extern bool g_EnableFrameSaving;
 extern int g_SaveFrameInterval;
 extern std::string g_OutputDirectory;
 extern int g_CurrentFrameNumber;
+// extern bool g_AllMonitorsInitialized; // Removed as per user request
 
 using namespace DirectX;
 
@@ -360,6 +362,52 @@ DUPL_RETURN OUTPUTMANAGER::CreateSharedSurf(INT SingleOutput, _Out_ UINT* OutCou
     if (FAILED(hr))
     {
         return ProcessFailure(m_Device, L"Failed to query for keyed mutex in OUTPUTMANAGER", L"Error", hr);
+    }
+
+    // Initialize the shared surface with the current desktop image using GDI
+    // This ensures we have valid content immediately without waiting for monitor updates
+    
+    // 1. Calculations
+    int width = DeskBounds->right - DeskBounds->left;
+    int height = DeskBounds->bottom - DeskBounds->top;
+    
+    // 2. Create GDI compatible DC and Bitmap
+    HDC hScreenDC = GetDC(NULL); // Get DC for the entire virtual screen
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
+    HGDIOBJ hOldBitmap = SelectObject(hMemDC, hBitmap);
+    
+    // 3. BitBlt the desktop
+    BitBlt(hMemDC, 0, 0, width, height, hScreenDC, DeskBounds->left, DeskBounds->top, SRCCOPY | CAPTUREBLT);
+    
+    // 4. Get the raw bits
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height; // Top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    
+    std::vector<uint8_t> pixelData(width * height * 4);
+    GetDIBits(hMemDC, hBitmap, 0, height, pixelData.data(), &bmi, DIB_RGB_COLORS);
+    
+    // 5. Cleanup GDI objects
+    SelectObject(hMemDC, hOldBitmap);
+    DeleteObject(hBitmap);
+    DeleteDC(hMemDC);
+    ReleaseDC(NULL, hScreenDC);
+    
+    // 6. Update the Direct3D texture
+    // Data from GDI is BGRA (8 bits per channel), which matches DXGI_FORMAT_B8G8R8A8_UNORM
+    
+    // Explicitly acquire mutex 0 to update the shared resource with initial GDI data
+    hr = m_KeyMutex->AcquireSync(0, 1000);
+    if (SUCCEEDED(hr))
+    {
+        m_DeviceContext->UpdateSubresource(m_SharedSurf, 0, NULL, pixelData.data(), width * 4, 0);
+        // Release mutex to 1 so the main loop (Consumer) can pick it up immediately
+        m_KeyMutex->ReleaseSync(1);
     }
 
     return DUPL_RETURN_SUCCESS;

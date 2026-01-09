@@ -99,4 +99,5 @@ prj/tests/googletest_mult/Makefile.googletest_getter
 /antigravity/Debug
 /antigravity/Release
 /antigravity/*.vcxproj.user
+/antigravity/out
 

@@ -126,6 +126,7 @@ DUPL_RETURN THREADMANAGER::Initialize(INT SingleOutput, UINT OutputCount, HANDLE
         m_ThreadData[i].OffsetX = DesktopDim->left;
         m_ThreadData[i].OffsetY = DesktopDim->top;
         m_ThreadData[i].PtrInfo = &m_PtrInfo;
+        m_ThreadData[i].InitialFrameCaptured = false;
 
         RtlZeroMemory(&m_ThreadData[i].DxRes, sizeof(DX_RESOURCES));
         Ret = InitializeDx(&m_ThreadData[i].DxRes);
@@ -136,6 +137,10 @@ DUPL_RETURN THREADMANAGER::Initialize(INT SingleOutput, UINT OutputCount, HANDLE
 
         DWORD ThreadId;
         m_ThreadHandles[i] = CreateThread(nullptr, 0, DDProc, &m_ThreadData[i], 0, &ThreadId);
+        if (m_ThreadHandles[i] == nullptr)
+        {
+            return ProcessFailure(nullptr, L"Failed to create thread", L"Error", E_FAIL);
+        }
         if (m_ThreadHandles[i] == nullptr)
         {
             return ProcessFailure(nullptr, L"Failed to create thread", L"Error", E_FAIL);
