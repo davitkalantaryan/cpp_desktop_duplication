@@ -101,3 +101,10 @@ prj/tests/googletest_mult/Makefile.googletest_getter
 /antigravity/*.vcxproj.user
 /antigravity/out
 
+/libantigravity/*/x64
+/libantigravity/x64
+/libantigravity/Debug
+/libantigravity/Release
+/libantigravity/*.vcxproj.user
+/libantigravity/out
+
