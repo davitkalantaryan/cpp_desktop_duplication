@@ -8,4 +8,5 @@
 
 typedef void (*TypeDesktopChange)(void*,const QImage*);
 
-int RegisterDesktopChangeCalbakc(void* a_userData, TypeDesktopChange a_clbk);
+int RegisterAndStartDesktopChangeCalbakc(void* a_userData, TypeDesktopChange a_clbk);
+void UnregisterDesktopChangeCalbakc(void);
