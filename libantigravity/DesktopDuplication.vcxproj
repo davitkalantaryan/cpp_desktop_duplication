@@ -164,6 +164,7 @@
     </ClCompile>
     <ClCompile Include="DisplayManager.cpp" />
     <ClCompile Include="DuplicationManager.cpp" />
+    <ClCompile Include="lib_dda_windows.cpp" />
     <ClCompile Include="OutputManager.cpp" />
     <ClCompile Include="ThreadManager.cpp" />
   </ItemGroup>
@@ -171,6 +172,7 @@
     <ClInclude Include="CommonTypes.h" />
     <ClInclude Include="DisplayManager.h" />
     <ClInclude Include="DuplicationManager.h" />
+    <ClInclude Include="lib_dda.h" />
     <ClInclude Include="OutputManager.h" />
     <ClInclude Include="ThreadManager.h" />
   </ItemGroup>
