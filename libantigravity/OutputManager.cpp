@@ -400,12 +400,12 @@ DUPL_RETURN OUTPUTMANAGER::ConsumeFrame(_In_ PTR_INFO* PointerInfo, _Out_ bool* 
 {
     *pFrameProcessed = false;
 
-    // Try and acquire sync on common display buffer
-    // Mutex 1 is used by duplication threads to signal that they have finished updating the shared surface
-    HRESULT hr = m_KeyMutex->AcquireSync(1, 10); // Short timeout because we are in a tight loop
+    // Acquire keyed mutex in order to access shared surface
+    // Wait up to 5 seconds to give plenty of time for consumer processing (callback/save)
+    HRESULT hr = m_KeyMutex->AcquireSync(1, 5000);
     if (hr == static_cast<HRESULT>(WAIT_TIMEOUT))
     {
-        // Another thread has the keyed mutex or no thread has released it yet
+        *pFrameProcessed = false;
         return DUPL_RETURN_SUCCESS;
     }
     else if (FAILED(hr))
@@ -418,11 +418,7 @@ DUPL_RETURN OUTPUTMANAGER::ConsumeFrame(_In_ PTR_INFO* PointerInfo, _Out_ bool* 
     if (Ret == DUPL_RETURN_SUCCESS)
     {
         // We have keyed mutex so we can access the mouse info
-        if (PointerInfo->Visible)
-        {
-            // Draw mouse into texture
-            Ret = DrawMouse(PointerInfo);
-        }
+        // Mouse drawing is now handled in SaveCurrentFrame
     }
 
     // Release keyed mutex to 0 so duplication threads can acquire it
@@ -511,6 +507,9 @@ DUPL_RETURN OUTPUTMANAGER::DrawFrame()
     UINT Offset = 0;
     FLOAT blendFactor[4] = { 0.f, 0.f, 0.f, 0.f };
     m_DeviceContext->OMSetBlendState(nullptr, blendFactor, 0xffffffff);
+    
+    const FLOAT Black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    m_DeviceContext->ClearRenderTargetView(m_RTV, Black);
     m_DeviceContext->OMSetRenderTargets(1, &m_RTV, nullptr);
 
     // Clear background to black
@@ -1144,27 +1143,38 @@ void OUTPUTMANAGER::SaveCurrentFrame(ID3D11Texture2D* sourceTexture, _In_ PTR_IN
         }
     }
 
+    // Ensure mouse is drawn on the snapshot BEFORE we copy to staging
+    if (PointerInfo->Visible)
+    {
+        DrawMouse(PointerInfo);
+    }
+
     // Copy to staging texture
     m_DeviceContext->CopyResource(m_StagingTexture, sourceTexture);
 
-    // Map for CPU read
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    hr = m_DeviceContext->Map(m_StagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
-    if (FAILED(hr)) return;
+    // Flush GPU commands to ensure all work (including DrawMouse) is finished
+    m_DeviceContext->Flush();
 
-    // Create QImage
-    // Note: Format_RGB32 is effectively BGR/BGRA in Qt on little endian, but DX11 B8G8R8A8 is exactly what we have.
+    // Map staging texture for CPU read
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = m_DeviceContext->Map(m_StagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr))
+    {
+        return;
+    }
+
+    // Create QImage and copy data row-by-row to handle alignment (RowPitch)
     QImage image(desc.Width, desc.Height, QImage::Format_RGB32);
-
-    // Copy row-by-row
-    for (UINT y = 0; y < desc.Height; y++) {
-        uint8_t* srcRow = (uint8_t*)mapped.pData + (y * mapped.RowPitch);
+    for (UINT y = 0; y < desc.Height; y++)
+    {
+        uint8_t* srcRow = reinterpret_cast<uint8_t*>(mappedResource.pData) + (y * mappedResource.RowPitch);
         uint8_t* dstRow = image.scanLine(y);
         memcpy(dstRow, srcRow, desc.Width * 4);
     }
 
     m_DeviceContext->Unmap(m_StagingTexture, 0);
 
+    // Invoke user callback with enriched metadata
     if (m_FrameCallback)
     {
         QRect rect(m_DesktopRect.left, m_DesktopRect.top, m_DesktopRect.right - m_DesktopRect.left, m_DesktopRect.bottom - m_DesktopRect.top);

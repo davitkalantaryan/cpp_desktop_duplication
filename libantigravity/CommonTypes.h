@@ -40,8 +40,6 @@ typedef _Return_type_success_(return == DUPL_RETURN_SUCCESS) enum
 _Post_satisfies_(return != DUPL_RETURN_SUCCESS)
 DUPL_RETURN ProcessFailure(_In_opt_ ID3D11Device* Device, _In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr, _In_opt_z_ HRESULT* ExpectedErrors = nullptr);
 
-void DisplayMsg(_In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr);
-
 //
 // Holds info about the pointer/cursor
 //

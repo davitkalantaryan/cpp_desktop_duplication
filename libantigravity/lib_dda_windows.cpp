@@ -30,13 +30,6 @@ HRESULT SystemTransitionsExpectedErrors[] = {
     S_OK
 };
 
-void DisplayMsg(_In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr)
-{
-    // Simplified logging/error handling for library
-    // For now, suppress message boxes or log to debug output
-    OutputDebugStringW(Str);
-}
-
 
 //
 // Entry point for new duplication threads
@@ -135,7 +128,7 @@ DWORD WINAPI DDProc(_In_ void* Param)
 
         // We have a new frame so try and process it
         // Try to acquire keyed mutex in order to access shared surface
-        hr = KeyMutex->AcquireSync(0, 1000);
+        hr = KeyMutex->AcquireSync(0, 5000);
         if (hr == static_cast<HRESULT>(WAIT_TIMEOUT))
         {
             // Can't use shared surface right now, try again later
@@ -245,19 +238,6 @@ HRESULT EnumOutputsExpectedErrors[] = {
 };
 
 
-//
-// Displays a message (Defined earlier but ensuring it matches expectation)
-//
-/*
-void DisplayMsg(_In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr)
-{
-    // Simplified logging/error handling for library
-    // For now, suppress message boxes or log to debug output
-    OutputDebugStringW(Str);
-}
-*/
-// Assuming DisplayMsg is already defined in this file (checked line 104 in previous version).
-
 _Post_satisfies_(return != DUPL_RETURN_SUCCESS)
 DUPL_RETURN ProcessFailure(_In_opt_ ID3D11Device* Device, _In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr, _In_opt_z_ HRESULT* ExpectedErrors)
 {
@@ -314,7 +294,7 @@ DUPL_RETURN ProcessFailure(_In_opt_ ID3D11Device* Device, _In_ LPCWSTR Str, _In_
     }
 
     // Error was not expected so display the message box
-    DisplayMsg(Str, Title, TranslatedHr);
+    OutputDebugStringW(Str);
 
     return DUPL_RETURN_ERROR_UNEXPECTED;
 }
@@ -395,6 +375,14 @@ unsigned int __stdcall WrapperProc(void* data)
             
             if (WaitResult == WAIT_OBJECT_0 || WaitResult == WAIT_OBJECT_0 + 2) // Terminate or UnexpectedError
             {
+                // Shutdown started. First, stop the monitor threads to ensure they finish their current work.
+                ThreadMgr.Clean();
+                
+                // Now perform one final capture to ensure the last state of the shared surface is emitted.
+                bool FrameProcessed = false;
+                OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
+                
+                // Break after final capture
                 break;
             }
             
