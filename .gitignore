@@ -107,4 +107,5 @@ prj/tests/googletest_mult/Makefile.googletest_getter
 /libantigravity/Release
 /libantigravity/*.vcxproj.user
 /libantigravity/out
+build_log*.txt
 

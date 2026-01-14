@@ -11,21 +11,23 @@
 #include <QDir>
 #include "lib_dda.h"
 
-// Define a simple struct to hold our saving state if needed
+// Define a simple struct to hold our saving state
 struct CallbackData {
     std::string OutputDirectory;
     int FrameCount;
 };
 
 // Callback function
-void FrameCallback(void* userData, const void* a_img)
+void FrameCallback(void* userData, const void* a_img, const void* a_rect, const void* a_point)
 {
     const QImage* img = (const QImage*)a_img;
-    if (!userData || !img) return;
+    const QRect* rect = (const QRect*)a_rect;
+    const QPoint* pt = (const QPoint*)a_point;
+
+    if (!userData || !img || !rect || !pt) return;
     CallbackData* data = (CallbackData*)userData;
 
-    // Ensure directory exists (basic check, optimized to not do it every frame if possible in real apps, 
-    // but for this test consistent with original logic)
+    // Ensure directory exists
     static bool dirChecked = false;
     QString dirPath = QString::fromStdString(data->OutputDirectory);
     if (!dirChecked)
@@ -37,13 +39,20 @@ void FrameCallback(void* userData, const void* a_img)
         dirChecked = true;
     }
 
-    // Save
-    QString filename = QString("%1/frame_%2.png")
+    // Save with rich filename
+    // frame_rect0x0x1980x100_mouse1--x200_200_000001.png
+    QString filename = QString("%1/frame_rect%2x%3x%4x%5_mouse%6--x%7_%8_%9.png")
         .arg(dirPath)
-        .arg(data->FrameCount, 6, 10, QChar('0'));
+        .arg(rect->x())
+        .arg(rect->y())
+        .arg(rect->width())
+        .arg(rect->height())
+        .arg(1) 
+        .arg(pt->x())
+        .arg(pt->y())
+        .arg(data->FrameCount++, 6, 10, QChar('0'));
     
     img->save(filename, "PNG");
-    data->FrameCount++;
 }
 
 //
@@ -69,15 +78,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
         return -1;
     }
 
-    // Wait Loop as requested
+    // Wait Loop
     while (1)
     {
         Sleep(10);
-        // In a real app we might look for a quit signal or key press
-        // For this test, user said they will terminate via Task Manager
     }
 
-    // Unregister (Unreachable in infinite loop but good practice)
+    // Unregister
     UnregisterDesktopChangeCalbakc();
 
     return 0;

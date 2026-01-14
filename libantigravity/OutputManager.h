@@ -19,7 +19,7 @@
 #include "warning.h"
 
 //
-// Handles the task of drawing into a window.
+// Handles the task of desktop frame consumption and saving.
 // Has the functionality to draw the mouse given a mouse shape buffer and position
 //
 class OUTPUTMANAGER
@@ -28,7 +28,7 @@ class OUTPUTMANAGER
         OUTPUTMANAGER();
         ~OUTPUTMANAGER();
         DUPL_RETURN InitOutput(INT SingleOutput, _Out_ UINT* OutCount, _Out_ RECT* DeskBounds);
-        DUPL_RETURN UpdateApplicationWindow(_In_ PTR_INFO* PointerInfo, _Inout_ bool* Occluded);
+        DUPL_RETURN ConsumeFrame(_In_ PTR_INFO* PointerInfo, _Out_ bool* pFrameProcessed);
         void CleanRefs();
         HANDLE GetSharedHandle();
         
@@ -60,13 +60,12 @@ class OUTPUTMANAGER
         ID3D11Texture2D* m_OutputTexture; // Replaces SwapChain buffer
         bool m_NeedsResize; 
         ID3D11Texture2D* m_StagingTexture;
-        void SaveCurrentFrame(ID3D11Texture2D* sourceTexture);
+        void SaveCurrentFrame(ID3D11Texture2D* sourceTexture, _In_ PTR_INFO* PointerInfo);
 
         // Callback data
-        TypeDesktopChange m_FrameCallback = nullptr;
-        void* m_CallbackUserData = nullptr;
+        TypeDesktopChange m_FrameCallback;
+        void* m_CallbackUserData;
+        RECT m_DesktopRect;
 };
 
 #endif
-
-

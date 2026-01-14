@@ -90,6 +90,7 @@ typedef struct _THREAD_DATA
     PTR_INFO* PtrInfo;
     DX_RESOURCES DxRes;
     bool InitialFrameCaptured;
+    HANDLE NewFrameEvent;
 } THREAD_DATA;
 
 //

@@ -68,22 +68,43 @@ DUPL_RETURN DISPLAYMANAGER::ProcessFrame(_In_ FRAME_DATA* Data, _Inout_ ID3D11Te
     // Process dirties and moves
     if (Data->FrameInfo.TotalMetadataBufferSize)
     {
-        D3D11_TEXTURE2D_DESC Desc;
-        Data->Frame->GetDesc(&Desc);
+        D3D11_TEXTURE2D_DESC FrameDesc;
+        Data->Frame->GetDesc(&FrameDesc);
 
+        // Process Move Rectangles
         if (Data->MoveCount)
         {
-            Ret = CopyMove(SharedSurf, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(Data->MetaData), Data->MoveCount, OffsetX, OffsetY, DeskDesc, Desc.Width, Desc.Height);
+            Ret = CopyMove(SharedSurf, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(Data->MetaData), Data->MoveCount, OffsetX, OffsetY, DeskDesc, FrameDesc.Width, FrameDesc.Height);
             if (Ret != DUPL_RETURN_SUCCESS)
             {
                 return Ret;
             }
         }
 
+        // Process Dirty Rectangles
         if (Data->DirtyCount)
         {
             Ret = CopyDirty(Data->Frame, SharedSurf, reinterpret_cast<RECT*>(Data->MetaData + (Data->MoveCount * sizeof(DXGI_OUTDUPL_MOVE_RECT))), Data->DirtyCount, OffsetX, OffsetY, DeskDesc);
+            if (Ret != DUPL_RETURN_SUCCESS)
+            {
+                return Ret;
+            }
         }
+    }
+    else if (Data->FrameInfo.LastPresentTime.QuadPart != 0)
+    {
+        // If metadata is 0 but LastPresentTime is non-zero, it means the whole screen might have changed.
+        // We treat the entire monitor as a single dirty rectangle.
+        D3D11_TEXTURE2D_DESC Desc;
+        Data->Frame->GetDesc(&Desc);
+
+        RECT FullRect;
+        FullRect.left = 0;
+        FullRect.top = 0;
+        FullRect.right = Desc.Width;
+        FullRect.bottom = Desc.Height;
+
+        Ret = CopyDirty(Data->Frame, SharedSurf, &FullRect, 1, OffsetX, OffsetY, DeskDesc);
     }
 
     return Ret;

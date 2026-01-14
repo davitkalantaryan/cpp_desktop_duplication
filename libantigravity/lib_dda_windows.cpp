@@ -30,71 +30,6 @@ HRESULT SystemTransitionsExpectedErrors[] = {
     S_OK
 };
 
-//
-// Dynamic Wait Class (Copied from DesktopDuplication.cpp)
-//
-typedef struct
-{
-    UINT    WaitTime;
-    UINT    WaitCount;
-}WAIT_BAND;
-
-#define WAIT_BAND_COUNT 3
-#define WAIT_BAND_STOP 0
-
-class DYNAMIC_WAIT
-{
-public:
-    DYNAMIC_WAIT();
-    ~DYNAMIC_WAIT();
-    void Wait();
-
-private:
-    static const WAIT_BAND   m_WaitBands[WAIT_BAND_COUNT];
-    static const UINT       m_WaitSequenceTimeInSeconds = 2;
-    UINT                    m_CurrentWaitBandIdx;
-    UINT                    m_WaitCountInCurrentBand;
-    LARGE_INTEGER           m_QPCFrequency;
-    LARGE_INTEGER           m_LastWakeUpTime;
-    BOOL                    m_QPCValid;
-};
-
-const WAIT_BAND DYNAMIC_WAIT::m_WaitBands[WAIT_BAND_COUNT] = {
-    {250, 20},
-    {2000, 60},
-    {5000, WAIT_BAND_STOP}
-};
-
-DYNAMIC_WAIT::DYNAMIC_WAIT() : m_CurrentWaitBandIdx(0), m_WaitCountInCurrentBand(0)
-{
-    m_QPCValid = QueryPerformanceFrequency(&m_QPCFrequency);
-    m_LastWakeUpTime.QuadPart = 0L;
-}
-
-DYNAMIC_WAIT::~DYNAMIC_WAIT() {}
-
-void DYNAMIC_WAIT::Wait()
-{
-    LARGE_INTEGER CurrentQPC = { 0 };
-    QueryPerformanceCounter(&CurrentQPC);
-    if (m_QPCValid && (CurrentQPC.QuadPart <= (m_LastWakeUpTime.QuadPart + (m_QPCFrequency.QuadPart * m_WaitSequenceTimeInSeconds))))
-    {
-        if ((m_WaitBands[m_CurrentWaitBandIdx].WaitCount != WAIT_BAND_STOP) && (m_WaitCountInCurrentBand > m_WaitBands[m_CurrentWaitBandIdx].WaitCount))
-        {
-            m_CurrentWaitBandIdx++;
-            m_WaitCountInCurrentBand = 0;
-        }
-    }
-    else
-    {
-        m_WaitCountInCurrentBand = 0;
-        m_CurrentWaitBandIdx = 0;
-    }
-    Sleep(m_WaitBands[m_CurrentWaitBandIdx].WaitTime);
-    QueryPerformanceCounter(&m_LastWakeUpTime);
-    m_WaitCountInCurrentBand++;
-}
-
 void DisplayMsg(_In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr)
 {
     // Simplified logging/error handling for library
@@ -246,6 +181,9 @@ DWORD WINAPI DDProc(_In_ void* Param)
             break;
         }
 
+        // Signal consumer that there is a new frame on the shared surface
+        SetEvent(TData->NewFrameEvent);
+
         // Release frame back to desktop duplication
         Ret = DuplMgr.DoneWithFrame();
         if (Ret != DUPL_RETURN_SUCCESS)
@@ -393,17 +331,23 @@ unsigned int __stdcall WrapperProc(void* data)
     RECT DeskBounds;
     UINT OutputCount;
     bool FirstTime = true;
-    bool Occluded = false;
-    DYNAMIC_WAIT DynamicWait;
-
-    while (WaitForSingleObjectEx(UnexpectedErrorEvent, 0, FALSE) != WAIT_OBJECT_0)
+    
+    // Create event to signal new frames from monitor threads
+    HANDLE NewFrameEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!NewFrameEvent)
     {
-        // Check if we requested termination externally
-        if (WaitForSingleObjectEx(TerminateThreadsEvent, 0, FALSE) == WAIT_OBJECT_0)
-        {
-            break;
-        }
+        return -1;
+    }
 
+    HANDLE WaitHandles[4] = {
+        TerminateThreadsEvent,
+        ExpectedErrorEvent,
+        UnexpectedErrorEvent,
+        NewFrameEvent
+    };
+
+    while (true)
+    {
         DUPL_RETURN Ret = DUPL_RETURN_SUCCESS;
 
         if (FirstTime || WaitForSingleObjectEx(ExpectedErrorEvent, 0, FALSE) == WAIT_OBJECT_0)
@@ -418,8 +362,6 @@ unsigned int __stdcall WrapperProc(void* data)
 
                 ThreadMgr.Clean();
                 OutMgr.CleanRefs();
-
-                DynamicWait.Wait();
             }
             else
             {
@@ -434,7 +376,7 @@ unsigned int __stdcall WrapperProc(void* data)
                 if (SharedHandle)
                 {
                     // Pass events to ThreadManager so it can signal them
-                    Ret = ThreadMgr.Initialize(SingleOutput, OutputCount, UnexpectedErrorEvent, ExpectedErrorEvent, TerminateThreadsEvent, SharedHandle, &DeskBounds);
+                    Ret = ThreadMgr.Initialize(SingleOutput, OutputCount, UnexpectedErrorEvent, ExpectedErrorEvent, TerminateThreadsEvent, NewFrameEvent, SharedHandle, &DeskBounds);
                 }
                 else
                 {
@@ -442,12 +384,31 @@ unsigned int __stdcall WrapperProc(void* data)
                 }
             }
 
-            Occluded = true;
+            // After initialization, attempt to capture the initial state immediately
+            bool FrameProcessed = false;
+            OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
         }
         else
         {
-            // Update/Save Frame
-            Ret = OutMgr.UpdateApplicationWindow(ThreadMgr.GetPointerInfo(), &Occluded);
+            // Wait for any of the events
+            DWORD WaitResult = WaitForMultipleObjects(4, WaitHandles, FALSE, INFINITE);
+            
+            if (WaitResult == WAIT_OBJECT_0 || WaitResult == WAIT_OBJECT_0 + 2) // Terminate or UnexpectedError
+            {
+                break;
+            }
+            
+            if (WaitResult == WAIT_OBJECT_0 + 1) // ExpectedError
+            {
+                continue; // Loop around to handle FirstTime || ExpectedError condition
+            }
+
+            if (WaitResult == WAIT_OBJECT_0 + 3) // NewFrameEvent
+            {
+                // Consume/Save Frame
+                bool FrameProcessed = false;
+                Ret = OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
+            }
         }
 
         if (Ret != DUPL_RETURN_SUCCESS)
@@ -463,13 +424,14 @@ unsigned int __stdcall WrapperProc(void* data)
         }
     }
 
-    // Cleanup monitor threads if they are running
-    SetEvent(TerminateThreadsEvent);
-    ThreadMgr.WaitForThreadTermination();
-    
     // Final cleanup
     ThreadMgr.Clean();
     OutMgr.CleanRefs();
+
+    if (NewFrameEvent)
+    {
+        CloseHandle(NewFrameEvent);
+    }
 
     return 0;
 }
