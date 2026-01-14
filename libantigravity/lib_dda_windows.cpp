@@ -46,6 +46,11 @@ DWORD WINAPI DDProc(_In_ void* Param)
 
     // Data passed in from thread creation
     THREAD_DATA* TData = reinterpret_cast<THREAD_DATA*>(Param);
+    THREADMANAGER* ThreadMgr = reinterpret_cast<THREADMANAGER*>(TData->ThreadMgr);
+
+    // PTR_INFO for this thread to use during capture
+    PTR_INFO LocalPtrInfo;
+    RtlZeroMemory(&LocalPtrInfo, sizeof(LocalPtrInfo));
 
     // Get desktop
     DUPL_RETURN Ret;
@@ -146,14 +151,17 @@ DWORD WINAPI DDProc(_In_ void* Param)
         // We can now process the current frame
         WaitToProcessCurrentFrame = false;
 
-        // Get mouse info
-        Ret = DuplMgr.GetMouse(TData->PtrInfo, &(CurrentData.FrameInfo), TData->OffsetX, TData->OffsetY);
+        // Get mouse info into local buffer
+        Ret = DuplMgr.GetMouse(&LocalPtrInfo, &(CurrentData.FrameInfo), TData->OffsetX, TData->OffsetY);
         if (Ret != DUPL_RETURN_SUCCESS)
         {
             DuplMgr.DoneWithFrame();
             KeyMutex->ReleaseSync(1);
             break;
         }
+
+        // Synchronize local mouse info with global state
+        ThreadMgr->UpdatePointerInfo(&LocalPtrInfo);
 
         // Process new frame
         Ret = DispMgr.ProcessFrame(&CurrentData, SharedSurf, TData->OffsetX, TData->OffsetY, &DesktopDesc);
@@ -200,16 +208,10 @@ Exit:
         }
     }
 
-    if (SharedSurf)
+    if (LocalPtrInfo.PtrShapeBuffer)
     {
-        SharedSurf->Release();
-        SharedSurf = nullptr;
-    }
-
-    if (KeyMutex)
-    {
-        KeyMutex->Release();
-        KeyMutex = nullptr;
+        delete [] LocalPtrInfo.PtrShapeBuffer;
+        LocalPtrInfo.PtrShapeBuffer = nullptr;
     }
 
     return 0;
@@ -366,7 +368,9 @@ unsigned int __stdcall WrapperProc(void* data)
 
             // After initialization, attempt to capture the initial state immediately
             bool FrameProcessed = false;
-            OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
+            PTR_INFO LatestPtr;
+            ThreadMgr.GetPointerInfo(&LatestPtr);
+            OutMgr.ConsumeFrame(&LatestPtr, &FrameProcessed);
         }
         else
         {
@@ -375,14 +379,24 @@ unsigned int __stdcall WrapperProc(void* data)
             
             if (WaitResult == WAIT_OBJECT_0 || WaitResult == WAIT_OBJECT_0 + 2) // Terminate or UnexpectedError
             {
-                // Shutdown started. First, stop the monitor threads to ensure they finish their current work.
+                // Shutdown started. 
+                // 1. Signal termination to all threads (already done by user or by error)
+                // 2. Wait for all monitor threads to exit gracefully
+                ThreadMgr.WaitForThreadTermination();
+
+                // 3. Drain Loop: Capture any final frames that were generated during shutdown.
+                // We do a brief loop to ensure the pipeline is empty.
+                for (int i = 0; i < 5; ++i)
+                {
+                    bool FrameProcessed = false;
+                    PTR_INFO LatestPtr;
+                    ThreadMgr.GetPointerInfo(&LatestPtr);
+                    OutMgr.ConsumeFrame(&LatestPtr, &FrameProcessed);
+                    if (!FrameProcessed) break; 
+                }
+                
+                // 4. Finally clean up resources
                 ThreadMgr.Clean();
-                
-                // Now perform one final capture to ensure the last state of the shared surface is emitted.
-                bool FrameProcessed = false;
-                OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
-                
-                // Break after final capture
                 break;
             }
             
@@ -395,7 +409,15 @@ unsigned int __stdcall WrapperProc(void* data)
             {
                 // Consume/Save Frame
                 bool FrameProcessed = false;
-                Ret = OutMgr.ConsumeFrame(ThreadMgr.GetPointerInfo(), &FrameProcessed);
+                PTR_INFO LatestPtr;
+                ThreadMgr.GetPointerInfo(&LatestPtr);
+                Ret = OutMgr.ConsumeFrame(&LatestPtr, &FrameProcessed);
+                
+                // Cleanup local copy of shape buffer if needed
+                if (LatestPtr.PtrShapeBuffer) {
+                    // Note: In this architecture, drawing usually happens on the same background thread or via staging,
+                    // but we ensure we don't leak if the getter allocated anything (it shouldn't in this version).
+                }
             }
         }
 

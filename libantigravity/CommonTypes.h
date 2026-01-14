@@ -15,6 +15,7 @@
 #include <new>
 #include <warning.h>
 #include <DirectXMath.h>
+#include <mutex>
 
 #include "PixelShader.h"
 #include "VertexShader.h"
@@ -85,7 +86,7 @@ typedef struct _THREAD_DATA
     UINT Output;
     INT OffsetX;
     INT OffsetY;
-    PTR_INFO* PtrInfo;
+    void* ThreadMgr;
     DX_RESOURCES DxRes;
     bool InitialFrameCaptured;
     HANDLE NewFrameEvent;
